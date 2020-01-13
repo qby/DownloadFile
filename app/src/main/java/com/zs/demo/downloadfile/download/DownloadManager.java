@@ -23,17 +23,14 @@ import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okio.BufferedSink;
+import okio.BufferedSource;
+import okio.Okio;
 
-/**
- * Created by zs
- * Date：2018年 09月 12日
- * Time：13:56
- * —————————————————————————————————————
- * About: 下载管理
- * —————————————————————————————————————
- */
 public class DownloadManager {
-    
+
+    private static final String TAG = "DownloadManager";
+
     private static final AtomicReference<DownloadManager> INSTANCE = new AtomicReference<>();
     private OkHttpClient mClient;
     private HashMap<String, Call> downCalls; //用来存放各个下载的请求
@@ -58,20 +55,21 @@ public class DownloadManager {
 
     /**
      * 查看是否在下载任务中
+     *
      * @param url
      * @return
      */
-    public boolean getDownloadUrl(String url){
+    public boolean getDownloadUrl(String url) {
         return downCalls.containsKey(url);
     }
 
     /**
      * 开始下载
      *
-     * @param url              下载请求的网址
+     * @param url 下载请求的网址
      */
     public void download(String url) {
-        
+
         Observable.just(url)
                 .filter(new Predicate<String>() { // 过滤 call的map中已经有了,就证明正在下载,则这次不下载
                     @Override
@@ -88,7 +86,7 @@ public class DownloadManager {
                 .map(new Function<Object, DownloadInfo>() { // 如果已经下载，重新命名
                     @Override
                     public DownloadInfo apply(Object o) {
-                        return getRealFileName((DownloadInfo)o);
+                        return getRealFileName((DownloadInfo) o);
                     }
                 })
                 .flatMap(new Function<DownloadInfo, ObservableSource<DownloadInfo>>() { // 下载
@@ -104,6 +102,7 @@ public class DownloadManager {
 
     /**
      * 下载取消或者暂停
+     *
      * @param url
      */
     public void pauseDownload(String url) {
@@ -116,9 +115,10 @@ public class DownloadManager {
 
     /**
      * 取消下载 删除本地文件
+     *
      * @param info
      */
-    public void cancelDownload(DownloadInfo info){
+    public void cancelDownload(DownloadInfo info) {
         pauseDownload(info.getUrl());
         info.setProgress(0);
         info.setDownloadStatus(DownloadInfo.DOWNLOAD_CANCEL);
@@ -143,6 +143,7 @@ public class DownloadManager {
 
     /**
      * 如果文件已下载重新命名新文件名
+     *
      * @param downloadInfo
      * @return
      */
@@ -204,30 +205,30 @@ public class DownloadManager {
 
             Response response = call.execute();
             File file = new File(Constant.FILE_PATH, downloadInfo.getFileName());
-            InputStream is = null;
-            FileOutputStream fileOutputStream = null;
+            BufferedSink sink = null;
+            BufferedSource source = null;
             try {
-                is = response.body().byteStream();
-                fileOutputStream = new FileOutputStream(file, true);
+                InputStream is = response.body().byteStream();
+                source = Okio.buffer(Okio.source(is));
+                sink = Okio.buffer(Okio.appendingSink(file));
                 byte[] buffer = new byte[2048];//缓冲数组2kB
                 int len;
-                while ((len = is.read(buffer)) != -1) {
-                    fileOutputStream.write(buffer, 0, len);
+                while ((len = source.read(buffer)) != -1) {
+                    sink.write(buffer, 0, len);
                     downloadLength += len;
                     downloadInfo.setProgress(downloadLength);
                     e.onNext(downloadInfo);
                 }
-                fileOutputStream.flush();
+                sink.flush();
                 downCalls.remove(url);
             } finally {
                 //关闭IO流
-                DownloadIO.closeAll(is, fileOutputStream);
+                DownloadIO.closeAll(sink, source);
 
             }
             e.onComplete();//完成
         }
     }
-
 
 
     /**
